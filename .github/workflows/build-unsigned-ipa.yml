@@ -1,0 +1,29 @@
+name: Build unsigned SimulMeet IPA
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer || true
+
+      - name: Build unsigned IPA
+        run: |
+          chmod +x build_unsigned_ipa.command
+          ./build_unsigned_ipa.command
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: SimulMeet-unsigned-ipa
+          path: output/SimulMeet-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
