@@ -1,0 +1,56 @@
+SimulMeet iOS 原生版
+
+重要说明
+1. 这是原生 SwiftUI iPhone/iPad 项目，不通过 Safari 浏览器运行。
+2. Apple 不允许 Windows 直接生成可安装的已签名 IPA。必须在 Mac 上用 Xcode 选择你的 Apple ID/开发团队完成签名。
+3. 不要把 API Key 写进源代码。App 第一次安装后，在“设置”页填写；密钥保存在 iPhone Keychain。
+
+使用 IPA 签名工具安装（适合你的方式）
+1. 先生成 SimulMeet-unsigned.ipa：
+   - Mac：双击或在终端运行 build_unsigned_ipa.command。
+   - 没有 Mac：把本项目上传到你自己的 GitHub 仓库，在 Actions 中运行“Build unsigned SimulMeet IPA”，下载 SimulMeet-unsigned-ipa 构建产物。
+2. 把 SimulMeet-unsigned.ipa 导入你的 IPA 签名工具。
+3. 在签名工具中选择你自己的 P12 证书和 mobileprovision 描述文件，或使用该工具支持的 Apple ID 签名方式。
+4. 签名完成后安装到 iPhone。
+5. 如果出现“无法验证 App”，检查证书是否有效、描述文件是否包含当前设备 UDID，以及 Bundle ID 是否匹配。
+6. 本项目不会附带他人的证书、描述文件或已经签名的 IPA。
+
+使用 Xcode 直接安装到 iPhone
+1. 在 Mac 安装 Xcode 16 或更新版本。
+2. 解压 ZIP，双击 SimulMeet.xcodeproj。
+3. 在 Xcode 左侧选择 SimulMeet 项目，再选择 TARGETS → SimulMeet → Signing & Capabilities。
+4. 勾选 Automatically manage signing，并选择你的 Apple ID/Team。
+5. 如果 Bundle Identifier 冲突，把 com.simulmeet.ios 改成你自己的唯一名称，例如 com.yourname.simulmeet。
+6. 用数据线或同一网络连接 iPhone，在 Xcode 顶部设备列表选择你的 iPhone。
+7. 点击 Run ▶。首次运行时按 iPhone 提示信任开发者。
+8. 免费 Apple ID 安装通常需要每 7 天重新签名；付费开发者账号可使用 TestFlight 或长期签名。
+
+第一次使用
+1. 打开 App → 设置。
+2. 填写豆包 API Key 和 DeepSeek API Key。
+3. 检查模型 ID 是否与你的火山方舟/DeepSeek 控制台一致。
+4. 点击“保存配置”。
+5. 返回“同传”，选择源语言和翻译模型，点击“开始连续字幕”。
+6. 第一次会请求麦克风和语音识别权限，请允许。
+
+主要功能
+- Apple Speech 实时语音识别，停顿后按完整句进入翻译队列。
+- Doubao Seed 1.6 Flash、Doubao Seed 2.0 Mini、DeepSeek V4 Flash 可切换。
+- 35 秒内对原文与中文译文进行双层近似去重，减少重复翻译和 Token。
+- 历史页可显示大量上下文；只有滚动条在底部时才自动跟随最新翻译。
+- 回答和会议总结只在手动点击时调用模型，并输出中文与英文。
+- 支持最多 10 个 TXT、MD、CSV、JSON、PDF 文本资料。
+- API Key 保存到 Keychain；翻译历史、资料和 Token 用量保存在 App 本地。
+- 不保存录音文件。
+
+iOS 系统限制
+- App 可以使用当前 iPhone 麦克风听现场声音。
+- iOS 不允许普通 App 直接读取 Zoom、Teams、腾讯会议或微信等其他 App 的内部音频。
+- 如果会议也在同一台 iPhone 的其他 App 中进行，需要外放让麦克风收音；本项目没有加入无法可靠使用的“内部音频”按钮。
+
+模型默认 ID
+- doubao-seed-1-6-flash-250828
+- doubao-seed-2-0-mini-260428
+- deepseek-v4-flash
+
+如果火山方舟控制台显示的是 endpoint ID，请在 App“设置”页把对应模型 ID 改为控制台提供的 ID。
