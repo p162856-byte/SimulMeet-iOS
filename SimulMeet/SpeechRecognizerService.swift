@@ -15,8 +15,11 @@ final class SpeechRecognizerService: ObservableObject {
     private var silenceWork: DispatchWorkItem?
     private var onSentence: ((String) -> Void)?
     private var restarting = false
+    private var lastDelivered = ""
+    private var lastDeliveredAt = Date.distantPast
+    private var recognitionContext: [String] = []
 
-    func start(localeIdentifier: String, onSentence: @escaping (String) -> Void) async throws {
+    func start(localeIdentifier: String, contextualStrings: [String] = [], onSentence: @escaping (String) -> Void) async throws {
         guard !isRunning else { return }
         let speechStatus = await withCheckedContinuation { continuation in
             SFSpeechRecognizer.requestAuthorization { continuation.resume(returning: $0) }
@@ -35,7 +38,11 @@ final class SpeechRecognizerService: ObservableObject {
         guard recognizer?.isAvailable == true else {
             throw NSError(domain: "SimulMeet", code: 3, userInfo: [NSLocalizedDescriptionKey: "当前语言的 Apple 语音识别暂时不可用。"])
         }
+
         self.onSentence = onSentence
+        lastDelivered = ""
+        lastDeliveredAt = .distantPast
+        recognitionContext = Array(contextualStrings.prefix(100))
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(.record, mode: .measurement, options: [.duckOthers, .allowBluetooth])
         try session.setActive(true, options: .notifyOthersOnDeactivation)
@@ -43,17 +50,14 @@ final class SpeechRecognizerService: ObservableObject {
         let input = audioEngine.inputNode
         let format = input.outputFormat(forBus: 0)
         input.removeTap(onBus: 0)
-        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
+        input.installTap(onBus: 0, bufferSize: 768, format: format) { [weak self] buffer, _ in
             guard let self else { return }
             self.request?.append(buffer)
-            let channel = buffer.floatChannelData?[0]
-            let frames = Int(buffer.frameLength)
-            if let channel, frames > 0 {
-                var sum: Float = 0
-                for index in 0..<frames { sum += channel[index] * channel[index] }
-                let rms = sqrt(sum / Float(frames))
-                Task { @MainActor in self.level = min(1, rms * 18) }
-            }
+            guard let channel = buffer.floatChannelData?[0], buffer.frameLength > 0 else { return }
+            var sum: Float = 0
+            for index in 0..<Int(buffer.frameLength) { sum += channel[index] * channel[index] }
+            let rms = sqrt(sum / Float(buffer.frameLength))
+            Task { @MainActor in self.level = min(1, rms * 18) }
         }
         audioEngine.prepare()
         try audioEngine.start()
@@ -82,14 +86,25 @@ final class SpeechRecognizerService: ObservableObject {
         let newRequest = SFSpeechAudioBufferRecognitionRequest()
         newRequest.shouldReportPartialResults = true
         newRequest.taskHint = .dictation
+        newRequest.contextualStrings = recognitionContext
         request = newRequest
         partialText = ""
+
         task = recognizer?.recognitionTask(with: newRequest) { [weak self] result, error in
             guard let self else { return }
             Task { @MainActor in
                 if let result {
-                    self.partialText = result.bestTranscription.formattedString
-                    self.scheduleSentenceDelivery(delay: result.isFinal ? 0.55 : 1.9)
+                    let text = result.bestTranscription.formattedString
+                    self.partialText = text
+                    let delay: TimeInterval
+                    if result.isFinal {
+                        delay = 0.18
+                    } else if self.hasSentenceEndingPunctuation(text) {
+                        delay = 0.42
+                    } else {
+                        delay = 1.15
+                    }
+                    self.scheduleSentenceDelivery(delay: delay)
                 }
                 if error != nil && self.isRunning {
                     self.deliverCurrentSentence()
@@ -98,6 +113,11 @@ final class SpeechRecognizerService: ObservableObject {
             }
         }
         restarting = false
+    }
+
+    private func hasSentenceEndingPunctuation(_ text: String) -> Bool {
+        guard let last = text.trimmingCharacters(in: .whitespacesAndNewlines).last else { return false }
+        return ".!?。！？".contains(last)
     }
 
     private func scheduleSentenceDelivery(delay: TimeInterval) {
@@ -116,6 +136,14 @@ final class SpeechRecognizerService: ObservableObject {
         let value = partialText.trimmingCharacters(in: .whitespacesAndNewlines)
         partialText = ""
         guard value.count > 1 else { return }
+
+        // Protection against the same finalized callback being delivered twice.
+        let normalized = DuplicateDetector.normalize(value)
+        let isImmediateCallbackDuplicate = normalized == DuplicateDetector.normalize(lastDelivered)
+            && Date().timeIntervalSince(lastDeliveredAt) < 0.8
+        guard !isImmediateCallbackDuplicate else { return }
+        lastDelivered = value
+        lastDeliveredAt = Date()
         onSentence?(value)
     }
 
@@ -126,7 +154,7 @@ final class SpeechRecognizerService: ObservableObject {
         request?.endAudio()
         task = nil
         request = nil
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) { [weak self] in
             guard let self else { return }
             self.restarting = false
             self.beginRecognitionTask()

@@ -2,7 +2,6 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct ContentView: View {
-    @EnvironmentObject private var vm: AppViewModel
     @State private var tab = 0
 
     var body: some View {
@@ -29,11 +28,8 @@ struct ContentView: View {
 
 private struct ScreenBackground: View {
     var body: some View {
-        LinearGradient(
-            colors: [Color(red: 0.94, green: 0.97, blue: 1), .white],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        ).ignoresSafeArea()
+        LinearGradient(colors: [Color(red: 0.94, green: 0.97, blue: 1), .white], startPoint: .topLeading, endPoint: .bottomTrailing)
+            .ignoresSafeArea()
     }
 }
 
@@ -50,8 +46,7 @@ private struct BrandHeader: View {
                 Spacer()
                 VStack(alignment: .trailing, spacing: 4) {
                     Label(vm.isListening ? "正在监听" : "未录音", systemImage: vm.isListening ? "mic.fill" : "mic.slash")
-                        .font(.caption.bold())
-                        .foregroundStyle(vm.isListening ? .green : .orange)
+                        .font(.caption.bold()).foregroundStyle(vm.isListening ? .green : .orange)
                     Text("待处理 \(vm.pendingCount) · Token \(vm.tokenUsage.total)")
                         .font(.caption2).foregroundStyle(.secondary)
                 }
@@ -79,13 +74,11 @@ private struct LiveView: View {
                         HStack {
                             Picker("源语言", selection: $vm.language) {
                                 ForEach(SourceLanguage.allCases) { Text($0.rawValue).tag($0) }
-                            }
-                            .pickerStyle(.menu)
+                            }.pickerStyle(.menu)
                             Spacer()
                             Picker("翻译模型", selection: $vm.translationModel) {
                                 ForEach(TranslationModel.allCases) { Text($0.title).tag($0) }
-                            }
-                            .pickerStyle(.menu)
+                            }.pickerStyle(.menu)
                         }
                         HStack(spacing: 9) {
                             PrimaryButton(title: vm.isListening ? "正在监听" : "开始连续字幕", icon: "play.fill", disabled: vm.isListening) { vm.start() }
@@ -106,7 +99,7 @@ private struct LiveView: View {
                         HStack {
                             Text("麦克风音量").font(.caption.bold())
                             Spacer()
-                            Text("iPhone 只采集麦克风，不读取其他 App 内部音频").font(.caption2).foregroundStyle(.secondary)
+                            Text("临时原文实时显示；完整句进入历史后逐句翻译").font(.caption2).foregroundStyle(.secondary)
                         }
                         ProgressView(value: Double(vm.speech.level)).tint(.blue)
                     }
@@ -122,41 +115,50 @@ private struct HistoryView: View {
     @EnvironmentObject private var vm: AppViewModel
     @Binding var tab: Int
     @State private var isAtBottom = true
+    @State private var selectedEntry: HistoryEntry?
 
     var body: some View {
         ZStack {
             ScreenBackground()
-            VStack(spacing: 10) {
+            VStack(spacing: 9) {
                 HStack {
-                    VStack(alignment: .leading) {
+                    VStack(alignment: .leading, spacing: 2) {
                         Text("翻译历史").font(.title2.bold())
-                        Text("向上查看时不会强制跳回最新记录").font(.caption).foregroundStyle(.secondary)
+                        Text("点击记录查看完整原文、译文与状态").font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
                     Text("\(vm.history.count) 句").font(.caption.bold()).padding(8).background(.white, in: Capsule())
                 }
+
                 ScrollViewReader { proxy in
                     ScrollView {
-                        LazyVStack(spacing: 7) {
+                        LazyVStack(spacing: 5) {
                             ForEach(vm.history) { item in
-                                HistoryRow(item: item) {
+                                HistoryRow(item: item, ask: {
                                     vm.question = item.source
                                     tab = 2
-                                }
+                                }, retry: {
+                                    vm.retryTranslation(item.id)
+                                })
+                                .contentShape(Rectangle())
+                                .onTapGesture { selectedEntry = item }
                             }
-                            Color.clear.frame(height: 2).id("history-bottom")
+                            Color.clear.frame(height: 3).id("history-bottom")
                                 .onAppear { isAtBottom = true }
                                 .onDisappear { isAtBottom = false }
                         }
                     }
                     .onChange(of: vm.history.count) { _ in
                         guard isAtBottom else { return }
-                        withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("history-bottom", anchor: .bottom) }
+                        withAnimation(.easeOut(duration: 0.18)) { proxy.scrollTo("history-bottom", anchor: .bottom) }
                     }
                     .onAppear { proxy.scrollTo("history-bottom", anchor: .bottom) }
                 }
             }
-            .padding(16)
+            .padding(14)
+        }
+        .sheet(item: $selectedEntry) { item in
+            HistoryDetailView(entryID: item.id, tab: $tab)
         }
     }
 }
@@ -164,19 +166,91 @@ private struct HistoryView: View {
 private struct HistoryRow: View {
     let item: HistoryEntry
     let ask: () -> Void
+    let retry: () -> Void
+
+    private var stateColor: Color {
+        switch item.resolvedState {
+        case .pending: return .orange
+        case .translating: return .blue
+        case .completed: return .green
+        case .failed: return .red
+        }
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 7) {
                 Text(item.date.formatted(date: .omitted, time: .standard)).font(.caption2).foregroundStyle(.secondary)
+                Text(item.resolvedState.title).font(.caption2.bold()).foregroundStyle(stateColor)
                 Spacer()
-                Button("提问这句", action: ask).font(.caption.bold()).buttonStyle(.bordered)
+                if item.resolvedState == .failed {
+                    Button(action: retry) { Image(systemName: "arrow.clockwise").font(.caption.bold()) }.buttonStyle(.borderless)
+                }
+                Button("提问", action: ask).font(.caption2.bold()).buttonStyle(.bordered)
             }
-            Text(item.source).font(.subheadline).lineLimit(2)
-            Text(item.chinese).font(.subheadline).foregroundStyle(Color(red: 0.06, green: 0.30, blue: 0.63)).lineLimit(2)
+            Text(item.source).font(.subheadline).lineLimit(1)
+            Group {
+                switch item.resolvedState {
+                case .pending: Text("等待翻译…")
+                case .translating: Text("正在翻译…")
+                case .completed: Text(item.chinese)
+                case .failed: Text(item.errorMessage ?? "翻译失败，点击重试")
+                }
+            }
+            .font(.subheadline)
+            .foregroundStyle(item.resolvedState == .failed ? .red : Color(red: 0.06, green: 0.30, blue: 0.63))
+            .lineLimit(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(11).cardStyle()
+        .padding(.horizontal, 10).padding(.vertical, 7).cardStyle()
+    }
+}
+
+private struct HistoryDetailView: View {
+    @EnvironmentObject private var vm: AppViewModel
+    @Environment(\.dismiss) private var dismiss
+    let entryID: UUID
+    @Binding var tab: Int
+
+    private var item: HistoryEntry? { vm.history.first { $0.id == entryID } }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                if let item {
+                    VStack(alignment: .leading, spacing: 16) {
+                        LabeledContent("时间", value: item.date.formatted(date: .abbreviated, time: .standard))
+                        LabeledContent("状态", value: item.resolvedState.title)
+                        if !item.model.isEmpty { LabeledContent("模型", value: item.model) }
+                        DetailBlock(title: "完整原文 / Source", text: item.source)
+                        DetailBlock(title: "完整中文翻译 / Chinese", text: item.chinese.isEmpty ? (item.errorMessage ?? item.resolvedState.title) : item.chinese)
+                        if item.resolvedState == .failed {
+                            Button("重新翻译") { vm.retryTranslation(item.id) }
+                                .buttonStyle(.borderedProminent).frame(maxWidth: .infinity)
+                        }
+                        Button("根据这句话提问") {
+                            vm.question = item.source
+                            dismiss()
+                            tab = 2
+                        }
+                        .buttonStyle(.bordered).frame(maxWidth: .infinity)
+                    }.padding(18)
+                }
+            }
+            .navigationTitle("翻译详情")
+            .toolbar { Button("完成") { dismiss() } }
+        }
+    }
+}
+
+private struct DetailBlock: View {
+    let title: String
+    let text: String
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(.headline)
+            Text(text).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+        }.padding(14).cardStyle()
     }
 }
 
@@ -189,7 +263,7 @@ private struct AssistantView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     Text("手动会议 / 面试助手").font(.title2.bold())
-                    Text("只有点击回答或总结时才消耗助手 Token。回答固定包含中文和英文。")
+                    Text("只有点击回答或总结时才消耗助手 Token，回答固定包含中文和英文。")
                         .font(.caption).foregroundStyle(.secondary)
                     Picker("助手模型", selection: $vm.assistantModel) {
                         ForEach(TranslationModel.allCases) { Text($0.title).tag($0) }
@@ -229,8 +303,7 @@ private struct MaterialsView: View {
                                 Text("已提取 \(item.text.count) 个字符").font(.caption).foregroundStyle(.secondary)
                             }
                         }.onDelete { indexes in
-                            let removed = indexes.map { vm.materials[$0] }
-                            removed.forEach { vm.removeMaterial($0) }
+                            indexes.map { vm.materials[$0] }.forEach { vm.removeMaterial($0) }
                         }
                     }
                 }.scrollContentBackground(.hidden)
@@ -258,6 +331,13 @@ private struct SettingsView: View {
                     TextField("Doubao Seed 1.6 Flash", text: $vm.flashModelID)
                     TextField("Doubao Seed 2.0 Mini", text: $vm.miniModelID)
                     TextField("DeepSeek V4 Flash", text: $vm.deepSeekModelID)
+                }
+                Section("准确度增强") {
+                    TextField("术语、姓名、课程名（逗号分隔）", text: $vm.customTerms, axis: .vertical)
+                        .lineLimit(2...5)
+                    Toggle("接口失败时自动切换模型", isOn: $vm.automaticFailover)
+                    Text("开始录音前保存。术语会同时帮助 Apple 语音识别和翻译纠错。")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
                 Section("Token 用量") {
                     LabeledContent("请求次数", value: "\(vm.tokenUsage.requests)")

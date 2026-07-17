@@ -1,6 +1,6 @@
 import Foundation
 
-enum TranslationModel: String, CaseIterable, Codable, Identifiable {
+enum TranslationModel: String, CaseIterable, Codable, Identifiable, Equatable {
     case doubaoFlash
     case doubaoMini
     case deepSeekFlash
@@ -41,19 +41,51 @@ enum SourceLanguage: String, CaseIterable, Identifiable {
     }
 }
 
+enum TranslationState: String, Codable, CaseIterable, Equatable {
+    case pending
+    case translating
+    case completed
+    case failed
+
+    var title: String {
+        switch self {
+        case .pending: return "待翻译"
+        case .translating: return "翻译中"
+        case .completed: return "已完成"
+        case .failed: return "翻译失败"
+        }
+    }
+}
+
 struct HistoryEntry: Codable, Identifiable, Equatable {
     let id: UUID
     let date: Date
     let source: String
-    let chinese: String
-    let model: String
+    var chinese: String
+    var model: String
+    var state: TranslationState?
+    var errorMessage: String?
 
-    init(id: UUID = UUID(), date: Date = Date(), source: String, chinese: String, model: String) {
+    init(
+        id: UUID = UUID(),
+        date: Date = Date(),
+        source: String,
+        chinese: String = "",
+        model: String = "",
+        state: TranslationState = .pending,
+        errorMessage: String? = nil
+    ) {
         self.id = id
         self.date = date
         self.source = source
         self.chinese = chinese
         self.model = model
+        self.state = state
+        self.errorMessage = errorMessage
+    }
+
+    var resolvedState: TranslationState {
+        state ?? (chinese.isEmpty ? .pending : .completed)
     }
 }
 
@@ -74,11 +106,6 @@ struct TokenUsage: Codable {
     var input = 0
     var output = 0
     var total = 0
-}
-
-struct RecentText {
-    let text: String
-    let date: Date
 }
 
 enum DuplicateDetector {
